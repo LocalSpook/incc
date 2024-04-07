@@ -1,0 +1,18 @@
+Checks:
+  - android-*
+  - bugprone-*
+  - clang-analyzer-*
+  - cppcoreguidelines-*
+  - concurrency-*
+  - darwin-*
+  - misc-*
+  - modernize-*
+  - performance-*
+  - portability-*
+
+  - -modernize-use-trailing-return-type
+  - -misc-non-private-member-variables-in-classes
+  - -cppcoreguidelines-non-private-member-variables-in-classes
+  - -cppcoreguidelines-pro-bounds-constant-array-index
+
+WarningsAsErrors: "*"

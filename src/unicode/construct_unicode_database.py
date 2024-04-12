@@ -117,6 +117,22 @@ def age(code_points: Iterable[ET.Element]) -> str:
 
 	return ret
 
+def taiwan_telegraph_codes(code_points):
+	ret = "\tstatic constexpr std::array<std::pair<code_point, std::uint32_t>> code_point_ranges {{{{\n"
+
+	for c in code_points:
+		if c.get("kTaiwanTelegraph") is not None:
+			if c.get("cp") is not None:
+				ret += f"\t\t{{0x{int(c.get("cp"), 16):06X}, {int(c.get("kTaiwanTelegraph"), 10)}}},\n"
+			elif c.get("first-cp") is not None and c.get("last-cp") is not None:
+				matching_code_points.extend(
+					range(int(c.get("first-cp"), 16), int(c.get("last-cp"), 16) + 1)
+				)
+
+	ret += "\t}}}};"
+
+	return ret
+
 def main() -> None:
 	args = parse_command_line_arguments()
 	xml_root = ET.parse(args.xml_database).getroot()
@@ -208,6 +224,18 @@ constexpr bool operator <(const code_point_range& r, const code_point c) noexcep
 })}
 
 {age(code_points)}
+
+namespace han {{
+
+/// Unihan property kTaiwanTelegraph.
+[[nodiscard]] constexpr std::optional<std::uint32_t> taiwan_telegraph_code(const code_point c) noexcept {{
+{taiwan_telegraph_codes(code_points)}
+
+	const auto lower_bound {{std::lower_bound(std::cbegin(code_point_ranges), std::cend(code_point_ranges), c, [] (const std::pair<code_point, std::uint32_t>& r, const code_point c) noexcept {{ return c > r.first; }})}};
+	return (lower_bound != std::cend(code_point_ranges) && c == lower_bound->first) ? return lower_bound.second : std::nullopt;
+}}
+
+}} // namespace han
 
 }} // namespace unicode
 """)

@@ -3,9 +3,11 @@
 import argparse
 import xml.etree.ElementTree as ET
 from more_itertools import consecutive_groups
-from typing import Iterable
+from typing import Iterable, Callable
 import sys
+import itertools
 import os
+from dataclasses import dataclass
 
 def parse_command_line_arguments():
 	parser = argparse.ArgumentParser(
@@ -25,7 +27,7 @@ def parse_command_line_arguments():
 	)
 	return parser.parse_args()
 
-def code_points_satisfying(property_name: str, code_points: Iterable[ET.Element], condition) -> str:
+def code_points_satisfying(property_name: str, code_points: Iterable[ET.Element], condition: Callable) -> str:
 	matching_code_points = []
 
 	for c in code_points:
@@ -41,6 +43,7 @@ def code_points_satisfying(property_name: str, code_points: Iterable[ET.Element]
 
 	ret = f"template <>\n"
 	ret += f"[[nodiscard]] constexpr bool has_property<{property_name}>(const code_point c) noexcept {{\n"
+	ret += f"\tASSERT_OR_ASSUME_CODE_POINT_IS_VALID(c);\n\n"
 
 	ret += f"\tstatic constexpr std::array<code_point_range, {len(ranges)}> code_point_ranges {{{{\n"
 	for r in ranges:
@@ -49,6 +52,68 @@ def code_points_satisfying(property_name: str, code_points: Iterable[ET.Element]
 
 	ret += f"\treturn std::binary_search(std::cbegin(code_point_ranges), std::cend(code_point_ranges), c);\n"
 	ret += f"}}"
+
+	return ret
+
+def binary_properties(code_points: Iterable[ET.Element], properties: dict[str, Callable]) -> str:
+	ret = f"enum class binary_property : std::uint32_t {{\n"
+	for name in properties:
+		ret += f"\t{name},\n"
+	ret += f"}};\n\n"
+
+	ret += """\
+template <binary_property property>
+[[nodiscard]] constexpr bool has_property(code_point) noexcept = delete;
+"""
+
+	for name, condition in properties.items():
+		ret += f"\n{code_points_satisfying(f"binary_property::{name}", code_points, condition)}\n"
+
+	return ret
+
+@dataclass
+class CodePointAge:
+	major: str
+	minor: str
+	code_point: int
+
+def age(code_points: Iterable[ET.Element]) -> str:
+	ret = f"""\
+[[nodiscard]] constexpr std::optional<std::pair<std::uint8_t, std::uint8_t>> age(const code_point c) noexcept {{
+	ASSERT_OR_ASSUME_CODE_POINT_IS_VALID(c);
+
+	struct compact_code_point_range_and_version final {{
+		bool assigned : 1;
+		std::uint8_t version_major : 5;
+		std::uint8_t version_minor : 5;
+		code_point upper_bound : 21;
+	}};
+
+	static_assert(sizeof(compact_code_point_range_and_version) <= 4);
+"""
+
+	ages = []
+	for c in code_points:
+		if age.contains("."):
+			major, minor = c.get("age").split(".")
+		else:
+			major, minor = None, None
+		if c.get("cp") is not None:
+			ages.append(CodePointAge(major, minor, int(c.get("cp"), 16)))
+		elif c.get("first-cp") is not None and c.get("last-cp") is not None:
+			for n in range(int(c.get("first-cp"), 16), int(c.get("last-cp"), 16) + 1):
+				ages.append(CodePointAge(major, minor, n))
+	ranges = [list(g) for g in itertools.groupby(ages)]
+
+	ret += f"\tstatic constexpr std::array<compact_code_point_range_and_version, {len(ranges)}> code_point_ranges {{\n"
+	for r in ranges:
+		ret += f"\t\t{{}},\n"
+	ret += f"}}\n\n"
+
+	ret += f"""\
+	const auto age {{std::lower_bound(std::cbegin(code_point_ranges), std::cend(code_point_ranges), c, [] (const compact_code_point_range_and_version& r, const code_point c) noexcept {{ return c > r.upper_bound; }})}};
+	return age.assigned ? {{age.version_major, age.version_minor}} : std::nullopt;
+}}"""
 
 	return ret
 
@@ -67,10 +132,39 @@ def main() -> None:
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <optional>
+
+#ifndef NDEBUG
+
+#include <cassert>
+
+#define ASSERT_OR_ASSUME_CODE_POINT_IS_VALID(c) \\
+	if constexpr {{                              \\
+		static_assert(is_valid_code_point(c));  \\
+	}} else {{                                    \\
+		assert(is_valid_code_point(c));         \\
+	}}
+
+#else
+
+#define ASSERT_OR_ASSUME_CODE_POINT_IS_VALID(c) \\
+	if constexpr {{                              \\
+		static_assert(is_valid_code_point(c));  \\
+	}} else {{                                    \\
+		[[assume(is_valid_code_point(c))]];     \\
+	}}
+
+#endif
 
 namespace unicode {{
 
 using code_point = std::uint32_t;
+
+inline constexpr code_point maximum_code_point_value {{0x10FFFF}};
+
+[[nodiscard]] constexpr bool is_valid_code_point(const code_point c) noexcept {{
+	return c <= maximum_code_point_value;
+}}
 
 /// A closed range of code points.
 struct code_point_range final {{
@@ -86,34 +180,11 @@ constexpr bool operator <(const code_point_range& r, const code_point c) noexcep
 	return c > r.upper_bound;
 }}
 
-enum class binary_property : std::uint32_t {{
-	xid_start,
-	xid_continue,
-	end_of_line,
-	ignorable_format_control,
-	horizontal_space,
-}};
-
-template <binary_property property>
-[[nodiscard]] constexpr bool has_property(code_point) noexcept = delete;
-
-{code_points_satisfying(
-	"binary_property::xid_start",
-	code_points,
-	lambda c: c.get("XIDS") == "Y" or c.get("ID_Compat_Math_Start") == "Y" or c.get("na") in ["LOW LINE"]
-)}
-
-{code_points_satisfying(
-	"binary_property::xid_continue",
-	code_points,
-	lambda c: c.get("XIDC") == "Y" or c.get("ID_Compat_Math_Continue") == "Y"
-)}
-
-// https://www.unicode.org/reports/tr31/#Whitespace_and_Syntax
-{code_points_satisfying(
-	"binary_property::end_of_line",
-	code_points,
-	lambda c: c.get("cp") in [
+{binary_properties(code_points, {
+	"xid_start": lambda c: c.get("XIDS") == "Y" or c.get("ID_Compat_Math_Start") == "Y" or c.get("na") in ["LOW LINE"],
+	"xid_continue": lambda c: c.get("XIDC") == "Y" or c.get("ID_Compat_Math_Continue") == "Y",
+	# https://www.unicode.org/reports/tr31/#Whitespace_and_Syntax
+	"end_of_line": lambda c: c.get("cp") in [
 		"000A",
 		"000B",
 		"000C",
@@ -121,19 +192,9 @@ template <binary_property property>
 		"0085",
 		"2028",
 		"2029",
-	]
-)}
-
-{code_points_satisfying(
-	"binary_property::ignorable_format_control",
-	code_points,
-	lambda c: c.get("Pat_WS") == "Y" and c.get("DI") == "Y"
-)}
-
-{code_points_satisfying(
-	"binary_property::horizontal_space",
-	code_points,
-	lambda c: c.get("Pat_WS") == "Y" and c.get("DI") == "N" and c.get("cp") not in [
+	],
+	"ignorable_format_control": lambda c: c.get("Pat_WS") == "Y" and c.get("DI") == "Y",
+	"horizontal_space": lambda c: c.get("Pat_WS") == "Y" and c.get("DI") == "N" and c.get("cp") not in [
 		"000A",
 		"000B",
 		"000C",
@@ -141,8 +202,12 @@ template <binary_property property>
 		"0085",
 		"2028",
 		"2029",
-	]
-)}
+	],
+	"deprecated": lambda c: c.get("Dep") == "Y",
+	"default_ignorable": lambda c: c.get("DI") == "Y",
+})}
+
+{age(code_points)}
 
 }} // namespace unicode
 """)

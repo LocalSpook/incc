@@ -89,6 +89,9 @@ constexpr bool operator <(const code_point_range& r, const code_point c) noexcep
 enum class binary_property : std::uint32_t {{
 	xid_start,
 	xid_continue,
+	end_of_line,
+	ignorable_format_control,
+	horizontal_space,
 }};
 
 template <binary_property property>
@@ -104,6 +107,41 @@ template <binary_property property>
 	"binary_property::xid_continue",
 	code_points,
 	lambda c: c.get("XIDC") == "Y" or c.get("ID_Compat_Math_Continue") == "Y"
+)}
+
+// https://www.unicode.org/reports/tr31/#Whitespace_and_Syntax
+{code_points_satisfying(
+	"binary_property::end_of_line",
+	code_points,
+	lambda c: c.get("cp") in [
+		"000A",
+		"000B",
+		"000C",
+		"000D",
+		"0085",
+		"2028",
+		"2029",
+	]
+)}
+
+{code_points_satisfying(
+	"binary_property::ignorable_format_control",
+	code_points,
+	lambda c: c.get("Pat_WS") == "Y" and c.get("DI") == "Y"
+)}
+
+{code_points_satisfying(
+	"binary_property::horizontal_space",
+	code_points,
+	lambda c: c.get("Pat_WS") == "Y" and c.get("DI") == "N" and c.get("cp") not in [
+		"000A",
+		"000B",
+		"000C",
+		"000D",
+		"0085",
+		"2028",
+		"2029",
+	]
 )}
 
 }} // namespace unicode

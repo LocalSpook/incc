@@ -3,6 +3,8 @@
 #include <exception>
 #include <print>
 
+#include "unicode.hpp"
+
 int main() try {
 	std::println("Hello world!");
 	return 0;

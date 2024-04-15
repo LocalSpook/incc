@@ -7,8 +7,8 @@ FetchContent_MakeAvailable(unicode_xml_database)
 
 add_custom_command(
 	OUTPUT unicode.hpp
-	COMMAND python "${CMAKE_CURRENT_SOURCE_DIR}/construct_unicode_database.py" --xml-database "${unicode_xml_database_SOURCE_DIR}/ucd.all.flat.xml" --output "unicode.hpp"
-	DEPENDS "${unicode_xml_database_SOURCE_DIR}/ucd.all.flat.xml" "${CMAKE_CURRENT_SOURCE_DIR}/construct_unicode_database.py"
+	COMMAND python "${CMAKE_CURRENT_SOURCE_DIR}/construct_unicode_hpp.py" --xml-database "${unicode_xml_database_SOURCE_DIR}/ucd.all.flat.xml" --output "unicode.hpp"
+	DEPENDS "${unicode_xml_database_SOURCE_DIR}/ucd.all.flat.xml" "${CMAKE_CURRENT_SOURCE_DIR}/construct_unicode_hpp.py"
 	VERBATIM
 )
 
